@@ -74,13 +74,14 @@ function system_sysctl_defaults()
         'hw.ixl.enable_head_writeback' => [ 'default' => '0', 'required' => true ],
         'hw.syscons.kbd_reboot' => [ 'default' => '0' ],
         'hw.uart.console' => [ 'default' => 'io:0x3f8,br:' . system_console_speed(), 'type' => 't' ], /* XXX support comconsole_port if needed */
+        'kern.coredump' => [ 'default' => '0', 'required' => true ],
         'kern.ipc.maxsockbuf' => [ 'default' => '4262144' ],
         'kern.randompid' => [ 'default' => '1' ],
         'net.enc.in.ipsec_bpf_mask' => [ 'default' => '2', 'required' => true ], /* after processing */
         'net.enc.in.ipsec_filter_mask' => [ 'default' => '2', 'required' => true ], /* after processing */
         'net.enc.out.ipsec_bpf_mask' => [ 'default' => '1', 'required' => true ], /* before processing */
         'net.enc.out.ipsec_filter_mask' => [ 'default' => '1', 'required' => true ], /* before processing */
-        'net.inet.icmp.drop_redirect' => [ 'default' => '0' ],
+        'net.inet.icmp.drop_redirect' => [ 'default' => '1', 'required' => true ],
         'net.inet.icmp.icmplim' => [ 'default' => '0' ],
         'net.inet.icmp.log_redirect' => [ 'default' => '0' ],
         'net.inet.icmp.reply_from_interface' => [ 'default' => '1', 'required' => true ],
@@ -102,10 +103,12 @@ function system_sysctl_defaults()
         'net.inet.udp.blackhole' => [ 'default' => '1' ],
         'net.inet.udp.checksum' => [ 'default' => 1 ],
         'net.inet.udp.maxdgram' => [ 'default' => '57344' ],
+        'net.inet6.ip6.accept_rtadv' => [ 'default' => isset($config['system']['ipv6allow']) ? '1' : '0', 'required' => true ],
         'net.inet6.ip6.forwarding' => [ 'default' => '1', 'required' => true ],
         'net.inet6.ip6.intr_queue_maxlen' => [ 'default' => '1000', 'required' => true ],
         'net.inet6.ip6.prefer_tempaddr' => [ 'default' => '0' ],
         'net.inet6.ip6.redirect' => [ 'default' => '0' ],
+        'net.inet6.ip6.rfc6204w3' => [ 'default' => isset($config['system']['ipv6allow']) ? '1' : '0', 'required' => true ],
         'net.inet6.ip6.use_tempaddr' => [ 'default' => '0' ],
         'net.link.bridge.pfil_bridge' => [ 'default' => '0' ],
         'net.link.bridge.pfil_local_phys' => [ 'default' => '0' ],
@@ -122,6 +125,8 @@ function system_sysctl_defaults()
         'security.bsd.see_other_gids' => [ 'default' => '0' ],
         'security.bsd.see_other_uids' => [ 'default' => '0' ],
         'vfs.read_max' => [ 'default' => '32' ],
+        'vfs.zfs.dirty_data_sync_percent' => [ 'default' => '5', 'required' => true ],
+        'vfs.zfs.txg.timeout' => [ 'default' => '90', 'required' => true ],
         'vm.pmap.pti' => [ 'default' => '1' ],
     ];
 }
@@ -272,7 +277,6 @@ function get_locale_list()
 
     if (!product::getInstance()->development()) {
         /* below 30% progress or currently unvetted */
-        unset($locales['zh_TW']);
         unset($locales['vi_VN']);
     }
 
@@ -567,13 +571,13 @@ function system_host_route($host, $gateway)
 function system_interface_route($gw, $routes)
 {
     $interface = $gw['interface'];
-    $gateway = $gw['gateway'];
-    $far = isset($gw['fargw']);
+    $gateway = $gw['gateway'] ?? 'missing';
+    $far = !empty($gw['fargw']);
     $device = $gw['if'];
     $family = 'inet';
 
     if (!is_ipaddrv4($gateway)) {
-        log_msg("ROUTING: not a valid interface gateway address: '{$gateway}'", LOG_ERR);
+        log_msg("ROUTING: not a valid {$interface} interface gateway address: '{$gateway}'", LOG_ERR);
         return;
     }
 
@@ -687,6 +691,11 @@ function system_routing_configure($verbose = false, $interface = null, $monitor 
             continue;
         }
 
+        if (empty($ifdetails[$gateway['if']]['ipv4'][0])) {
+            log_msg("ROUTING: refusing to set interface route on addressless {$gateway['interface']}({$gateway['if']})", LOG_WARNING);
+            continue;
+        }
+
         system_interface_route($gateway, $routes);
     }
 
@@ -743,8 +752,8 @@ function system_routing_configure($verbose = false, $interface = null, $monitor 
             }
 
             $interfacegw = $gateway['if'];
-            $gatewayip = $gateway['gateway'];
-            $fargw = isset($gateway['fargw']) && $gateway['ipprotocol'] != 'inet6';
+            $gatewayip = $gateway['gateway'] ?? '';
+            $fargw = !empty($gateway['fargw']) && $gateway['ipprotocol'] != 'inet6';
             $blackhole = '';
 
             switch ($rtent['gateway']) {
@@ -830,6 +839,22 @@ function system_syslog_stop()
     mwexecf('/usr/sbin/service syslog-ng stop');
 }
 
+function system_syslog_reset($verbose = false)
+{
+    $it = new RecursiveDirectoryIterator('/var/log');
+
+    foreach (new RecursiveIteratorIterator($it) as $file) {
+        if ($file->isFile() && strpos($file->getFilename(), '.log') > -1) {
+            if (strpos($file->getFilename(), 'flowd') === false) {
+                @unlink((string)$file);
+            }
+        }
+    }
+
+    system_syslog_start($verbose);
+    plugins_configure('dhcp', $verbose);
+}
+
 /*
  *     get_memory()
  *     returns an array listing the amount of
@@ -847,37 +872,27 @@ function get_memory()
 
 function system_firmware_configure($verbose = false)
 {
-    global $config;
+    service_log('Writing firmware settings:', $verbose);
 
-    service_log('Writing firmware setting...', $verbose);
+    $scripts = glob('/usr/local/opnsense/scripts/firmware/repos/*');
+    natsort($scripts);
 
-    /* calculate the effective ABI */
-    $args = [ exec_safe('-A %s', shell_safe('opnsense-version -x')) ];
-    $url_sub = '';
+    foreach ($scripts as $script) {
+        $basename = basename($script);
+        if ($basename == 'README' || strpos($basename, '.pgksave') !== false) {
+            continue;
+        } elseif (!is_executable($script)) {
+            continue;
+        }
 
-    if (!empty($config['system']['firmware']['subscription'])) {
-        /*
-         * Append the url now that it is not in the mirror anymore.
-         * This only ever works if the mirror is set to a non-default.
-         */
-        $url_sub = '/' . $config['system']['firmware']['subscription'];
-    } else {
-        /* clear the license file when no subscription key is set */
-        @unlink('/usr/local/opnsense/version/core.license');
+         /* run the script in passthru() but avoid standard output from this side */
+         passthru($script . '> /dev/null');
+
+        /* make a note about repo being handled */
+        service_log(' ' . preg_replace('/\..*?$/', '', $basename));
     }
 
-    if (!empty($config['system']['firmware']['mirror'])) {
-        $args[] = exec_safe('-m %s', str_replace('/', '\/', $config['system']['firmware']['mirror'] . $url_sub));
-    }
-
-    if (!empty($config['system']['firmware']['flavour'])) {
-        $args[] = exec_safe('-n %s', str_replace('/', '\/', $config['system']['firmware']['flavour']));
-    }
-
-    /* rewrite the config via the defaults and possible arguments */
-    mwexec('/usr/local/sbin/opnsense-update -sd ' . join(' ', $args));
-
-    service_log("done.\n", $verbose);
+    service_log("\n");
 }
 
 function system_trust_configure($verbose = false)
@@ -967,7 +982,7 @@ function system_trust_configure($verbose = false)
     service_log("done.\n", $verbose);
 
     /* collects all trusted certificates into /etc/ssl/certs directory */
-    passthru('/usr/sbin/certctl rehash');
+    passthru('/usr/local/opnsense/scripts/system/certctl.py rehash');
 
     service_log('Writing trust bundles...', $verbose);
 
@@ -982,6 +997,8 @@ function system_trust_configure($verbose = false)
         file_put_contents($pem, $ca_bundle);
         chmod($pem, 0644);
     }
+
+    configd_run('template reload OPNsense/Trust');
 
     service_log("done.\n", $verbose);
 }
@@ -1186,8 +1203,6 @@ function system_login_configure($verbose = false)
     /* depends on user account locking */
     local_sync_accounts();
 
-    configd_run('template reload OPNsense/Auth');
-
     $serialspeed = system_console_speed();
 
     $new_boot_config = array();
@@ -1269,7 +1284,7 @@ function system_login_configure($verbose = false)
     $etc_ttys_lines = explode("\n", file_get_contents('/etc/ttys'));
     $fd = fopen('/etc/ttys', 'w');
 
-    $on_off_secure_u = $serial_enabled ? (isset($config['system']['serialusb']) ? 'on' : 'onifconsole') . ' secure' : 'off secure';
+    $on_off_secure_u = $serial_enabled ? (!empty($config['system']['serialusb']) ? 'on' : 'onifconsole') . ' secure' : 'off secure';
     $on_off_secure_v = $virtual_enabled ? 'onifexists secure' : 'off secure';
     if (isset($config['system']['disableconsolemenu'])) {
         $console_type = 'Pc';
@@ -1290,7 +1305,7 @@ function system_login_configure($verbose = false)
 
         /* serial terminals */
         foreach (['tty%s0', 'tty%s1', 'tty%s2', 'tty%s3'] as $serialport) {
-            $serialport = sprintf($serialport, isset($config['system']['serialusb']) ? 'U' : 'u');
+            $serialport = sprintf($serialport, !empty($config['system']['serialusb']) ? 'U' : 'u');
             if (stripos($tty, $serialport) === 0) {
                 fwrite($fd, "{$serialport}\t\"/usr/libexec/getty {$serial_type}\"\tvt100\t{$on_off_secure_u}\n");
                 continue 2;
@@ -1313,6 +1328,8 @@ function system_login_configure($verbose = false)
     }
 
     fclose($fd);
+
+    configd_run('template reload OPNsense/Auth');
 
     service_log("done.\n", $verbose);
 

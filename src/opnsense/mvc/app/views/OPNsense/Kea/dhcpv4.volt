@@ -1,30 +1,28 @@
 {#
-
-    OPNsense® is Copyright © 2023 by Deciso B.V.
-    All rights reserved.
-
-    Redistribution and use in source and binary forms, with or without modification,
-    are permitted provided that the following conditions are met:
-
-    1.  Redistributions of source code must retain the above copyright notice,
-    this list of conditions and the following disclaimer.
-
-    2.  Redistributions in binary form must reproduce the above copyright notice,
-    this list of conditions and the following disclaimer in the documentation
-    and/or other materials provided with the distribution.
-
-    THIS SOFTWARE IS PROVIDED “AS IS” AND ANY EXPRESS OR IMPLIED WARRANTIES,
-    INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
-    AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
-    AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
-    OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
-    SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
-    INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
-    CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
-    ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
-    POSSIBILITY OF SUCH DAMAGE.
-
-#}
+ # Copyright (c) 2023 Deciso B.V.
+ # All rights reserved.
+ #
+ # Redistribution and use in source and binary forms, with or without modification,
+ # are permitted provided that the following conditions are met:
+ #
+ # 1. Redistributions of source code must retain the above copyright notice,
+ #    this list of conditions and the following disclaimer.
+ #
+ # 2. Redistributions in binary form must reproduce the above copyright notice,
+ #    this list of conditions and the following disclaimer in the documentation
+ #    and/or other materials provided with the distribution.
+ #
+ # THIS SOFTWARE IS PROVIDED ``AS IS'' AND ANY EXPRESS OR IMPLIED WARRANTIES,
+ # INCLUDING, BUT NOT LIMITED TO, THE IMPLIED WARRANTIES OF MERCHANTABILITY
+ # AND FITNESS FOR A PARTICULAR PURPOSE ARE DISCLAIMED. IN NO EVENT SHALL THE
+ # AUTHOR BE LIABLE FOR ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY,
+ # OR CONSEQUENTIAL DAMAGES (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF
+ # SUBSTITUTE GOODS OR SERVICES; LOSS OF USE, DATA, OR PROFITS; OR BUSINESS
+ # INTERRUPTION) HOWEVER CAUSED AND ON ANY THEORY OF LIABILITY, WHETHER IN
+ # CONTRACT, STRICT LIABILITY, OR TORT (INCLUDING NEGLIGENCE OR OTHERWISE)
+ # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
+ # POSSIBILITY OF SUCH DAMAGE.
+ #}
 
 <script>
     $( document ).ready(function() {
@@ -53,7 +51,7 @@
             }
         );
 
-        $("#grid-reservations").UIBootgrid(
+        let grid_reservations = $("#grid-reservations").UIBootgrid(
             {   search:'/api/kea/dhcpv4/search_reservation',
                 get:'/api/kea/dhcpv4/get_reservation/',
                 set:'/api/kea/dhcpv4/set_reservation/',
@@ -81,6 +79,31 @@
                 updateServiceControlUI('kea');
             }
         });
+
+        /**
+         * Reservations csv download and upload
+         */
+        $("#download_reservations").click(function(e){
+            e.preventDefault();
+            window.open("/api/kea/dhcpv4/download_reservations");
+        });
+        $("#upload_reservations").SimpleFileUploadDlg({
+            onAction: function(){
+                grid_reservations.bootgrid('reload');
+            }
+        });
+
+        /**
+         *
+         */
+        $("#subnet4\\.option_data_autocollect").change(function(){
+            if ($(this).is(':checked')) {
+                $(".option_data_autocollect").closest('tr').hide();
+            } else {
+                $(".option_data_autocollect").closest('tr').show();
+            }
+        });
+
     });
 </script>
 
@@ -102,6 +125,7 @@
                 <tr>
                   <th data-column-id="uuid" data-type="string" data-identifier="true" data-visible="false">{{ lang._('ID') }}</th>
                   <th data-column-id="subnet" data-type="string">{{ lang._('Subnet') }}</th>
+                  <th data-column-id="description" data-type="string">{{ lang._('Description') }}</th>
                   <th data-column-id="commands" data-width="7em" data-formatter="commands" data-sortable="false">{{ lang._('Commands') }}</th>
                 </tr>
             </thead>
@@ -111,7 +135,7 @@
                 <tr>
                     <td></td>
                     <td>
-                        <button data-action="add" type="button" class="btn btn-xs btn-primary pull-right"><span class="fa fa-fw fa-plus"></span></button>
+                        <button data-action="add" type="button" class="btn btn-xs btn-primary"><span class="fa fa-fw fa-plus"></span></button>
                     </td>
                 </tr>
             </tfoot>
@@ -137,7 +161,17 @@
                 <tr>
                     <td></td>
                     <td>
-                        <button data-action="add" type="button" class="btn btn-xs btn-primary pull-right"><span class="fa fa-fw fa-plus"></span></button>
+                        <button data-action="add" type="button" class="btn btn-xs btn-primary"><span class="fa fa-fw fa-plus"></span></button>
+                        <button
+                            id="upload_reservations"
+                            type="button"
+                            data-title="{{ lang._('Import reservations') }}"
+                            data-endpoint='/api/kea/dhcpv4/upload_reservations'
+                            title="{{ lang._('Import csv') }}"
+                            data-toggle="tooltip"
+                            class="btn btn-xs"
+                        ><span class="fa fa-fw fa-upload"></span></button>
+                        <button id="download_reservations" type="button" title="{{ lang._('Export as csv') }}" data-toggle="tooltip"  class="btn btn-xs"><span class="fa fa-fw fa-table"></span></button>
                     </td>
                 </tr>
             </tfoot>
@@ -160,7 +194,7 @@
                 <tr>
                     <td></td>
                     <td>
-                        <button data-action="add" type="button" class="btn btn-xs btn-primary pull-right"><span class="fa fa-fw fa-plus"></span></button>
+                        <button data-action="add" type="button" class="btn btn-xs btn-primary"><span class="fa fa-fw fa-plus"></span></button>
                     </td>
                 </tr>
             </tfoot>

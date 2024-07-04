@@ -28,7 +28,7 @@
 
 namespace OPNsense\Interfaces;
 
-use Phalcon\Messages\Message;
+use OPNsense\Base\Messages\Message;
 use OPNsense\Base\BaseModel;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Util;
@@ -42,12 +42,12 @@ class Vip extends BaseModel
     {
         $messages = parent::performValidation($validateFullModel);
 
-        $unqiue_addrs = [];
+        $unique_addrs = [];
         $carp_vhids = [];
         $vips = [];
 
         // collect changed VIP entries
-        $vip_fields = ['mode', 'subnet', 'subnet_bits', 'password', 'vhid', 'interface'];
+        $vip_fields = ['mode', 'subnet', 'subnet_bits', 'password', 'vhid', 'interface', 'peer', 'peer6'];
         foreach ($this->getFlatNodes() as $key => $node) {
             $tagName = $node->getInternalXMLTagName();
             $parentNode = $node->getParentNode();
@@ -117,6 +117,17 @@ class Vip extends BaseModel
                         }
                     }
                 }
+            } elseif ((string)$node->mode == 'proxyarp') {
+                $net = $subnet . "/" . $subnet_bits;
+                if (Util::isSubnet($net) && !Util::isSubnetStrict($net)) {
+                    $messages->appendMessage(
+                        new Message(
+                            gettext("Only strict subnets are allowed for Proxy ARP types" .
+                                " (e.g. 192.168.0.0/24, 192.168.1.1/32)."),
+                            $key . ".subnet"
+                        )
+                    );
+                }
             }
             $vhid_key = sprintf("%s_%s", $node->interface, $node->vhid);
             if ((string)$node->mode == 'carp') {
@@ -146,6 +157,23 @@ class Vip extends BaseModel
                         new Message(
                             sprintf($errmsg, (string)$node->vhid, (string)$carp_vhids[$vhid_key]->interface),
                             $key . ".vhid"
+                        )
+                    );
+                }
+                /* XXX: ideally we shouldn't need the validations below, but when using the same vhid for
+                 *      ipv4 and ipv6 one will always flip back to multicast */
+                if (strpos($subnet, ':') === false && !empty((string)$node->peer6)) {
+                    $messages->appendMessage(
+                        new Message(
+                            gettext('An (unicast) address can only be configured for the same protocol family.'),
+                            $key . ".peer6"
+                        )
+                    );
+                } elseif (strpos($subnet, ':') !== false && !empty((string)$node->peer)) {
+                    $messages->appendMessage(
+                        new Message(
+                            gettext('An (unicast) address can only be configured for the same protocol family.'),
+                            $key . ".peer"
                         )
                     );
                 }
@@ -186,7 +214,7 @@ class Vip extends BaseModel
     public function whereUsed($address)
     {
         $relevant_paths = [
-          'nat.outbound.rule.' => gettext('Address %s referenced by outboud nat rule "%s"'),
+          'nat.outbound.rule.' => gettext('Address %s referenced by outbound nat rule "%s"'),
           'nat.rule.' => gettext('Address %s referenced by port forward "%s"'),
         ];
         $usages = [];

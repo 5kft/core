@@ -33,6 +33,7 @@ use OPNsense\Core\Backend;
 use OPNsense\Core\Config;
 use OPNsense\Firewall\Util;
 use OPNsense\Routing\Gateways;
+use OPNsense\Interface\Autoconf;
 
 class OverviewController extends ApiControllerBase
 {
@@ -54,7 +55,8 @@ class OverviewController extends ApiControllerBase
             'gateways' => gettext('Gateways'),
             'routes' => gettext('Routes'),
             'macaddr' => gettext('MAC Address'),
-            'media_raw' => gettext('Media'),
+            'media' => gettext('Media'),
+            'media_raw' => gettext('Media (Raw)'),
             'mediaopt' => gettext('Media Options'),
             'capabilities' => gettext('Capabilities'),
             'identifier' => gettext('Identifier'),
@@ -87,6 +89,18 @@ class OverviewController extends ApiControllerBase
             'packets for unknown protocol' => gettext('Packets for Unknown Protocol'),
             'HW offload capabilities' => gettext('Hardware Offload Capabilities'),
             'uptime at attach or stat reset' => gettext('Uptime at Attach or Statistics Reset'),
+            'laggoptions' => gettext('LAGG Options'),
+            'lagghash' => gettext('LAGG Hash'),
+            'laggproto' => gettext('LAGG Protocol'),
+            'laggstatistics' => gettext('LAGG Statistics'),
+            'groups' => gettext('Groups'),
+            'active ports' => gettext('Active Ports'),
+            'vlan' => gettext('VLAN details'),
+            'vlan_tag' => gettext('VLAN Tag'),
+            'ifctl.nameserver' => gettext('Dynamic nameserver received'),
+            'ifctl.prefix'  => gettext('Dynamic IPv6 prefix received'),
+            'ifctl.router'  => gettext('Dynamic router received'),
+            'ifctl.searchdomain'  => gettext('Dynamic searchdomain received')
         ];
     }
 
@@ -104,14 +118,13 @@ class OverviewController extends ApiControllerBase
         /* detailed information */
         if ($detailed) {
             $stats = json_decode($backend->configdpRun('interface list stats', [$interface]), true);
-            if (!$interface) {
-                foreach ($ifinfo as $if => $info) {
-                    if (array_key_exists($if, $stats)) {
-                        $ifinfo[$if]['statistics'] = $stats[$if];
-                    }
+
+            foreach ($ifinfo as $if => $info) {
+                if ($interface !== null && $if !== $interface) {
+                    continue;
                 }
-            } else {
-                $ifinfo[$interface]['statistics'] = $stats;
+
+                $ifinfo[$if]['statistics'] = $interface !== null ? $stats : $stats[$if];
             }
         }
 
@@ -141,6 +154,10 @@ class OverviewController extends ApiControllerBase
             if ($if == 'pfsync0') {
                 continue;
             }
+            /* collect ifctl received properties for this interface */
+            foreach (Autoconf::all($if) as $key => $value) {
+                $tmp["ifctl.{$key}"] =  $value;
+            }
 
             $tmp['status'] = (!empty($details['flags']) && in_array('up', $details['flags'])) ? 'up' : 'down';
             if (!empty($details['status'])) {
@@ -165,6 +182,12 @@ class OverviewController extends ApiControllerBase
             $tmp['link_type'] = !empty($config['ipaddr']) ? $config['ipaddr'] : 'none';
             if (Util::isIpAddress($tmp['link_type'])) {
                 $tmp['link_type'] = 'static';
+            } elseif (empty($config['ipaddr']) && !empty(!empty($config['ipaddrv6']))) {
+                /* link_type prefers ipv4, but if none is found, show ipv6 type */
+                $tmp['link_type'] = $config['ipaddrv6'];
+                if (Util::isIpAddress($tmp['link_type'])) {
+                    $tmp['link_type'] = 'static';
+                }
             }
 
             /* parse IP configuration */
@@ -186,6 +209,8 @@ class OverviewController extends ApiControllerBase
                                             $entry['status'] = $carp['status'];
                                             $entry['advbase'] = $carp['advbase'];
                                             $entry['advskew'] = $carp['advskew'];
+                                            $entry['peer'] = $carp['peer'];
+                                            $entry['peer6'] = $carp['peer6'];
                                         }
                                     }
                                 }
@@ -197,10 +222,16 @@ class OverviewController extends ApiControllerBase
                 }
             }
 
+            /* parse VLAN configuration */
+            $tmp['vlan_tag'] = null;
+            if (!empty($details['vlan']) && !empty($details['vlan']['tag'])) {
+                $tmp['vlan_tag'] = $details['vlan']['tag'];
+            }
+
             /* gateway(s) */
             $gatewayv4 =  $gateways->getInterfaceGateway($tmp['identifier'], 'inet');
             $gatewayv6 = $gateways->getInterfaceGateway($tmp['identifier'], 'inet6');
-            $tmp['gateways'] = array_filter([$gatewayv4, $gatewayv6]);
+            $tmp['gateways'] = array_values(array_filter([$gatewayv4, $gatewayv6]));
 
             $result[] = $tmp;
         }
@@ -214,7 +245,7 @@ class OverviewController extends ApiControllerBase
         $result = $this->parseIfInfo(null, $details);
         return $this->searchRecordsetBase(
             $result,
-            ['status', 'description', 'device', 'link_type', 'ipv4', 'ipv6', 'gateways', 'routes']
+            ['status', 'description', 'device', 'link_type', 'ipv4', 'ipv6', 'gateways', 'vlan_tag', 'routes']
         );
     }
 
@@ -226,7 +257,7 @@ class OverviewController extends ApiControllerBase
             $ifinfo = $this->parseIfInfo($if, true)[0] ?? [];
             if (!empty($ifinfo)) {
                 if (!empty($ifinfo['macaddr'])) {
-                    $macs = json_decode((new Backend())->configdRun('interface list macdb json'), true);
+                    $macs = json_decode((new Backend())->configdRun('interface list macdb'), true);
                     $mac_hi = strtoupper(substr(str_replace(':', '', $ifinfo['macaddr']), 0, 6));
                     if (array_key_exists($mac_hi, $macs)) {
                         $ifinfo['macaddr'] = $ifinfo['macaddr'] . ' - ' . $macs[$mac_hi];
@@ -242,6 +273,7 @@ class OverviewController extends ApiControllerBase
                 }
 
                 unset($ifinfo['config']);
+                unset($ifinfo['carp']);
 
                 /* apply translations */
                 foreach ($ifinfo as $key => $value) {
@@ -255,7 +287,7 @@ class OverviewController extends ApiControllerBase
             }
         }
 
-        return json_encode($result);
+        return $result;
     }
 
     public function reloadInterfaceAction($identifier = null)
@@ -276,6 +308,6 @@ class OverviewController extends ApiControllerBase
         $this->sessionClose();
         $this->response->setRawHeader('Content-Type: application/json');
         $this->response->setRawHeader('Content-Disposition: attachment; filename=ifconfig.json');
-        echo (new Backend())->configdRun('interface list ifconfig');
+        echo json_encode($this->parseIfInfo(null, true));
     }
 }

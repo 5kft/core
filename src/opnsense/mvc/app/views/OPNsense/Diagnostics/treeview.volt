@@ -1,5 +1,5 @@
 {#
- # Copyright (c) 2020 Deciso B.V.
+ # Copyright (c) 2020-2023 Deciso B.V.
  # All rights reserved.
  #
  # Redistribution and use in source and binary forms, with or withoutmodification,
@@ -23,6 +23,26 @@
  # ARISING IN ANY WAY OUT OF THE USE OF THIS SOFTWARE, EVEN IF ADVISED OF THE
  # POSSIBILITY OF SUCH DAMAGE.
  #}
+
+ <style>
+    .bootstrap-dialog-body {
+        overflow-x: auto;
+    }
+    .modal-dialog,
+    .modal-content {
+        height: 80%;
+    }
+
+    .modal-body {
+        height: calc(100% - 120px);
+        overflow-y: scroll;
+    }
+    @media (min-width: 768px) {
+        .modal-dialog {
+            width: 90%;
+        }
+    }
+</style>
 
 <script>
     $( document ).ready(function() {
@@ -101,7 +121,7 @@
     <div id="{{tab['name']}}" class="tab-pane fade in active">
       <div class="row">
           <section class="col-xs-12">
-              <div class="content-box">
+            <div class="content-box">
                 <div class="searchbox">
                     <input
                         id="{{tab['name']}}Search"
