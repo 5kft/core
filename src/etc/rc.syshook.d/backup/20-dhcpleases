@@ -1,6 +1,6 @@
 #!/bin/sh
 
-BACKUPDIR="/var/dhcpd/var/db"
+BACKUPDIR="/var/db/kea"
 BACKUPFILE="/conf/dhcpleases.tgz"
 BACKUPOFF="<dhcpbackup>-1</dhcpbackup>"
 
