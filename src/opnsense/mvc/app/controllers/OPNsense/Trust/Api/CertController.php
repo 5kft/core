@@ -200,7 +200,7 @@ class CertController extends ApiMutableModelControllerBase
             Config::getInstance()->lock();
             $node = $this->getModel()->getNodeByReference('cert.' . $uuid);
             if ($node !== null) {
-                $this->checkAndThrowValueInUse((string)$node->refid, false, false, ['cert']);
+                $this->checkAndThrowValueInUse((string)$node->refid, false, false, ['cert', 'system.user']);
             }
             return $this->delBase('cert', $uuid);
         }
@@ -285,6 +285,7 @@ class CertController extends ApiMutableModelControllerBase
                 if (!empty($tmp['payload'])) {
                     // binary data, we need to encode it to deliver it to the client
                     $result['payload_b64'] = base64_encode($tmp['payload']);
+                    $result['status'] = 'ok';
                 } else {
                     $result['error'] = $tmp['error'] ?? '';
                 }
