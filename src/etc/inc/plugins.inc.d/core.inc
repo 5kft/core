@@ -293,7 +293,7 @@ function core_cron()
     $jobs[]['autocron'] = array('/usr/local/sbin/expiretable -v -t 3600 virusprot', '3');
     $jobs[]['autocron'] = array('/usr/local/etc/rc.expireaccounts', '4');
     $jobs[]['autocron'] = array('/usr/local/sbin/ping_hosts.sh', '*/4');
-    $jobs[]['autocron'] = array('/usr/local/sbin/configctl -d firmware changelog cron', '0', '22');
+    $jobs[]['autocron'] = array('/usr/local/sbin/configctl -d firmware changelog cron', '0', '22', '*', '*', '1');
 
     /**
      * rrd graph collector, only execute when script is present and not locked by rrd_configure()
