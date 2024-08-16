@@ -41,6 +41,7 @@ from .interface import InterfaceParser
 from .auth import AuthGroup
 from .base import BaseContentParser
 
+import ipaddress
 
 class Alias(object):
     def __init__(self, elem, known_aliases=[], ttl=-1, ssl_no_verify=False, timeout=120):
@@ -63,6 +64,7 @@ class Alias(object):
             'proto': 'IPv4,IPv6'
         }
         self._ttl = ttl
+        self._skip_update_modtime = False
         self._name = None
         self._type = None
         self._items = list()
@@ -184,9 +186,18 @@ class Alias(object):
                     self._resolve_content = self.pre_process()
                     address_parser = self.get_parser()
                     if address_parser:
+                        addresses_only = True
                         for item in self.items():
+                            try:
+                                ipaddress.ip_address(item)
+                            except ValueError:
+                                addresses_only = False
+
                             for address in address_parser.iter_addresses(item):
                                 self._resolve_content.add(address)
+
+                        self._skip_update_modtime = addresses_only
+
                         # resolve hostnames (async) if there are any in the collected set
                         self._resolve_content = self._resolve_content.union(address_parser.resolve_dns())
                 except (IOError, DNSException) as e:
@@ -208,7 +219,7 @@ class Alias(object):
                        old_uniqueid = open(self._filename_alias_hash, 'r').read()
                     if old_uniqueid != new_uniqueid:
                         open(self._filename_alias_hash, 'w').write(self.uniqueid())
-                    else:
+                    elif not self._skip_update_modtime:
                         # update modification time for correct TTL measurements when unchanged
                         os.utime(self._filename_alias_hash, None)
             else:
