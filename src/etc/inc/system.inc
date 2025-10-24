@@ -240,7 +240,17 @@ function system_resolvconf_generate($verbose = false)
     /* append custom user options */
     $resolvconf .= @file_get_contents('/etc/resolv.conf.local');
 
-    file_safe('/etc/resolv.conf', $resolvconf);
+    $fn_etc_resolvconf = '/etc/resolv.conf';
+    if (file_exists($fn_etc_resolvconf)) {
+        $old_csum = sha1_file($fn_etc_resolvconf);
+        $new_csum = sha1($resolvconf);
+    } else {
+        $old_csum = 0;
+        $new_csum = $old_csum + 1;
+    }
+    if ($old_csum != $new_csum) {
+        file_safe($fn_etc_resolvconf, $resolvconf);
+    }
 
     /* setup static routes for DNS servers as configured */
     foreach ($routes as $host => $gateway) {
@@ -501,7 +511,17 @@ function system_hosts_generate($verbose = false)
         }
     }
 
-    file_put_contents('/etc/hosts', $hosts);
+    $fn_etc_hosts = '/etc/hosts';
+    if (file_exists($fn_etc_hosts)) {
+        $old_csum = sha1_file($fn_etc_hosts);
+        $new_csum = sha1($hosts);
+    } else {
+        $old_csum = 0;
+        $new_csum = $old_csum + 1;
+    }
+    if ($old_csum != $new_csum) {
+        file_put_contents($fn_etc_hosts, $hosts);
+    }
 
     service_log("done.\n", $verbose);
 }
